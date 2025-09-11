@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Wildlife Monitoring - Polished Demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; }
+header { background:#2e8b57; color:white; text-align:center; padding:20px; }
+#map { height:600px; width:90%; margin:20px auto; border:2px solid #2e8b57; border-radius:10px; }
+.controls { text-align:center; margin-bottom:10px; }
+button { padding:10px 20px; margin:5px; background:#2e8b57; color:white; border:none; border-radius:5px; cursor:pointer; }
+button:hover{ background:#246b45; }
+.alert-box { position:fixed; top:20px; right:20px; background:red; color:white; padding:15px; border-radius:5px; display:none; box-shadow:0 4px 6px rgba(0,0,0,0.3); font-weight:bold; z-index:999; }
+</style>
+</head>
+<body>
+<header>
+<h1>AI Wildlife Monitoring - Polished Demo</h1>
+<p>Automatic alerts, siren, leave time, and ranger movement</p>
+</header>
+
+<div class="controls">
+<button onclick="toggleNightMode()">Toggle Night/Thermal Mode</button>
+<button onclick="startDemo()">Start Demo</button>
+</div>
+
+<div id="map"></div>
+<div class="alert-box" id="alertBox">ALERT!</div>
+<audio id="sirenAudio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Map setup
+var map = L.map('map').setView([26.2,91.7],13);
+var normalTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+var nightTiles = L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',{attribution:'© Stadia Maps'});
+var nightMode=false;
+function toggleNightMode(){nightMode=!nightMode;if(nightMode){map.removeLayer(normalTiles);nightTiles.addTo(map);}else{map.removeLayer(nightTiles);normalTiles.addTo(map);}}
+
+// Siren unlock
+var sirenUnlocked=false;
+function startDemo(){sirenUnlocked=true;alert("Demo Started! Siren and alerts are now active.");}
+
+// Rangers
+var rangers=[
+{name:"Ranger 1",lat:26.215,lon:91.715,marker:null,line:null},
+{name:"Ranger 2",lat:26.225,lon:91.730,marker:null,line:null}
+];
+rangers.forEach(r=>{
+  r.marker=L.marker([r.lat,r.lon],{icon:L.icon({iconUrl:'https://img.icons8.com/color/48/000000/forest-ranger.png',iconSize:[32,32]})}).addTo(map).bindPopup("<b>"+r.name+"</b>");
+});
+
+// Animals (small zones for quick demo)
+var animals=[
+{name:"Elephant",lat:26.210,lon:91.705,speed:0.0002,icon:'https://img.icons8.com/color/48/000000/elephant.png',safeZone:L.circle([26.210,91.705],{radius:120,color:'green',fillColor:'#0f3',fillOpacity:0.2}).addTo(map),outsideFlag:false,path:L.polyline([], {color:'red'}).addTo(map)},
+{name:"Tiger",lat:26.230,lon:91.740,speed:0.00025,icon:'https://img.icons8.com/color/48/000000/tiger.png',safeZone:L.circle([26.230,91.740],{radius:100,color:'green',fillColor:'#0f3',fillOpacity:0.2}).addTo(map),outsideFlag:false,path:L.polyline([], {color:'orange'}).addTo(map)},
+{name:"Deer",lat:26.225,lon:91.700,speed:0.00015,icon:'https://img.icons8.com/color/48/000000/deer.png',safeZone:L.circle([26.225,91.700],{radius:80,color:'green',fillColor:'#0f3',fillOpacity:0.2}).addTo(map),outsideFlag:false,path:L.polyline([], {color:'yellow'}).addTo(map)}
+];
+animals.forEach(a=>{a.marker=L.marker([a.lat,a.lon],{icon:L.icon({iconUrl:a.icon,iconSize:[40,40]})}).addTo(map).bindPopup("<b>"+a.name+"</b>");});
+
+// Check inside safe zone
+function checkInsideZone(a){
+  if(a.safeZone instanceof L.Circle){
+    return map.distance([a.lat,a.lon],a.safeZone.getLatLng())<=a.safeZone.getRadius();
+  }
+}
+
+// Alerts with leave time and siren
+function updateAlerts(){
+  animals.forEach(a=>{
+    var inside=checkInsideZone(a);
+    var now=new Date();
+    if(!inside){
+      if(!a.outsideFlag){
+        a.outsideFlag=true;
+        a.leaveTime=now.toLocaleTimeString();
+        document.getElementById('alertBox').innerText=a.name+" left safe area at "+a.leaveTime+" ! RED ALERT!";
+        document.getElementById('alertBox').style.display='block';
+        if(sirenUnlocked){
+          var audio=document.getElementById('sirenAudio');
+          audio.currentTime=0; audio.loop=true; audio.play();
+        }
+        map.setView([a.lat,a.lon],15);
+      }
+    } else {
+      if(a.outsideFlag){
+        a.outsideFlag=false;
+        var audio=document.getElementById('sirenAudio');
+        audio.pause(); audio.loop=false;
+        // keep alert visible for 3s
+        setTimeout(()=>{ 
+          if(!a.outsideFlag){ 
+            document.getElementById('alertBox').style.display='none'; 
+          }
+        },3000);
+      }
+    }
+  });
+}
+
+// Movement (slower inside, smoother outside)
+setInterval(()=>{
+  animals.forEach(a=>{
+    var inside=checkInsideZone(a);
+    var step=inside?a.speed:a.speed*6; // smoother outside movement
+    a.lat+=(Math.random()-0.5)*step;
+    a.lon+=(Math.random()-0.5)*step;
+    a.marker.setLatLng([a.lat,a.lon]);
+    a.path.addLatLng([a.lat,a.lon]);
+  });
+
+  // Rangers head to nearest outside animal
+  var outsideAnimals=animals.filter(a=>!checkInsideZone(a));
+  rangers.forEach(r=>{
+    if(outsideAnimals.length>0){
+      let nearest=outsideAnimals[0];
+      let minDist=map.distance([r.lat,r.lon],[nearest.lat,nearest.lon]);
+      outsideAnimals.forEach(a=>{
+        let dist=map.distance([r.lat,r.lon],[a.lat,a.lon]);
+        if(dist<minDist){nearest=a;minDist=dist;}
+      });
+      var latDiff=nearest.lat-r.lat;
+      var lonDiff=nearest.lon-r.lon;
+      r.lat+=latDiff*0.07; r.lon+=lonDiff*0.07; // faster ranger
+      r.marker.setLatLng([r.lat,r.lon]);
+      if(r.line) map.removeLayer(r.line);
+      r.line=L.polyline([[r.lat,r.lon],[nearest.lat,nearest.lon]],{color:'red',weight:2,dashArray:'5,5'}).addTo(map);
+    }
+  });
+
+  updateAlerts();
+},100); // smooth 100ms
+</script>
+</body>
+</html>
